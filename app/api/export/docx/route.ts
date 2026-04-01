@@ -73,7 +73,9 @@ export async function POST(req: NextRequest) {
   });
 
   const buffer = await Packer.toBuffer(doc);
-  return new NextResponse(buffer, {
+  const fileBytes = new Uint8Array(buffer);
+
+  return new NextResponse(fileBytes, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'Content-Disposition': 'attachment; filename="ai-seo-report.docx"'
