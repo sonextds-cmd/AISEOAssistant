@@ -498,11 +498,26 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
 
   const overallScore = Math.round((zones.reduce((sum, zone) => sum + zone.score, 0) / zones.length) * 0.6 + readabilityScore * 0.15 + yoastScore * 0.25);
 
-  const quickWins = [...zones.flatMap((zone) => zone.items), ...yoastItems.map((item) => ({ ...item, score: item.status === 'good' ? 10 : item.status === 'needs-work' ? 6 : 2, maxScore: 10, fix: item.details }))]
-    .filter((item) => (item as CheckItem).score / (item as CheckItem).maxScore < 0.8)
-    .sort((a, b) => (a as CheckItem).score / (a as CheckItem).maxScore - (b as CheckItem).score / (b as CheckItem).maxScore)
+  const quickWinPool: Array<{ label: string; details: string; score: number; maxScore: number }> = [
+    ...zones.flatMap((zone) => zone.items.map((item) => ({
+      label: item.label,
+      details: item.fix || item.details,
+      score: item.score,
+      maxScore: item.maxScore
+    }))),
+    ...yoastItems.map((item) => ({
+      label: item.label,
+      details: item.details,
+      score: item.status === 'good' ? 10 : item.status === 'needs-work' ? 6 : 2,
+      maxScore: 10
+    }))
+  ];
+
+  const quickWins = quickWinPool
+    .filter((item) => item.score / item.maxScore < 0.8)
+    .sort((a, b) => a.score / a.maxScore - b.score / b.maxScore)
     .slice(0, 7)
-    .map((item) => `${item.label}: ${'fix' in item ? item.fix : item.details}`);
+    .map((item) => `${item.label}: ${item.details}`);
 
   return {
     analyzedUrl,
