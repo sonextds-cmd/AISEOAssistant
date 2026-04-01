@@ -1,5 +1,5 @@
 {
-  "framework": "nextjs",
-  "installCommand": "npm ci",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npx npm@10.8.2 install --no-fund --no-audit --package-lock=false",
   "buildCommand": "npm run build"
 }
