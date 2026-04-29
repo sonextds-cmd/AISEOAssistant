@@ -27,6 +27,18 @@ export type YoastItem = {
   status: Status;
   details: string;
   value?: string | number;
+  suggestion?: string;
+  location?: string;
+  nextStep?: string;
+};
+
+export type ActionPlanItem = {
+  id: string;
+  label: string;
+  priority: 'High' | 'Medium';
+  missing: string;
+  location: string;
+  nextStep: string;
 };
 
 export type AnalysisResult = {
@@ -40,6 +52,7 @@ export type AnalysisResult = {
   zones: ZoneResult[];
   overallZoneSummary: string;
   yoastItems: YoastItem[];
+  actionPlan: ActionPlanItem[];
   quickWins: string[];
   raw: Record<string, unknown>;
 };
@@ -96,6 +109,49 @@ function flattenSchemaTypes(input: unknown): string[] {
   };
   visit(input);
   return [...new Set(out)];
+}
+
+
+function detectSummaryBlock($: cheerio.CheerioAPI) {
+  const summarySelectors = [
+    'section[class*="summary"]',
+    'div[class*="summary"]',
+    'section[class*="highlight"]',
+    'div[class*="highlight"]',
+    'section[class*="takeaway"]',
+    'div[class*="takeaway"]',
+    'aside[class*="summary"]',
+    'aside[class*="highlight"]'
+  ];
+
+  const summaryHeadingRegex = /summary|key takeaways|highlights|tl;dr|สรุป|สาระสำคัญ|ประเด็นสำคัญ/i;
+  const firstBlocks = $('body').find('h2, h3, h4, p, ul, ol, section, div').slice(0, 30);
+
+  let hasSummaryHeading = false;
+  let hasEarlyBulletList = false;
+  let hasSummaryContainer = false;
+
+  firstBlocks.each((_, el) => {
+    const tag = el.tagName?.toLowerCase() || '';
+    const text = $(el).text().replace(/\s+/g, ' ').trim();
+
+    if (/^h[2-4]$/.test(tag) && summaryHeadingRegex.test(text)) {
+      hasSummaryHeading = true;
+    }
+
+    if ((tag === 'ul' || tag === 'ol') && $(el).find('li').length >= 3) {
+      hasEarlyBulletList = true;
+    }
+  });
+
+  hasSummaryContainer = summarySelectors.some((selector) => $(selector).length > 0);
+
+  return {
+    found: hasSummaryHeading || hasEarlyBulletList || hasSummaryContainer,
+    hasSummaryHeading,
+    hasEarlyBulletList,
+    hasSummaryContainer
+  };
 }
 
 function tokenizeWords(text: string) {
@@ -189,10 +245,6 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
   const ogDescription = attrOf($, 'meta[property="og:description"]', 'content');
   const ogImage = attrOf($, 'meta[property="og:image"]', 'content');
   const ogUrl = attrOf($, 'meta[property="og:url"]', 'content');
-  const twitterCard = attrOf($, 'meta[name="twitter:card"]', 'content');
-  const twitterTitle = attrOf($, 'meta[name="twitter:title"]', 'content');
-  const twitterDescription = attrOf($, 'meta[name="twitter:description"]', 'content');
-  const twitterImage = attrOf($, 'meta[name="twitter:image"]', 'content');
 
   const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
   const cleanText = bodyText.replace(/\s+/g, ' ').trim();
@@ -279,7 +331,7 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
   const numericMatches = bodyText.match(/\b\d+[\d,\.]*\b/g) ?? [];
   const yearMatches = bodyText.match(/\b(19|20)\d{2}\b/g) ?? [];
   const priceMatches = bodyText.match(/฿|บาท|usd|thb|\$/gi) ?? [];
-  const tldrSection = /tl;dr|สรุปสั้นๆ|สรุปย่อ|สรุปเร็ว/i.test(bodyText);
+  const summaryBlock = detectSummaryBlock($);
   const bullets = $('ul li, ol li').length;
   const tables = $('table').length;
   const lists = $('ul, ol').length;
@@ -362,11 +414,11 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
     {
       id: 'tldr',
       label: 'TL;DR Summary',
-      score: tldrSection && bullets >= 3 ? 10 : bullets >= 3 ? 6 : 2,
+      score: summaryBlock.found ? 10 : bullets >= 3 ? 6 : 2,
       maxScore: 10,
       status: 'poor',
-      details: tldrSection ? 'พบส่วนสรุปย่อที่พร้อมให้ AI และผู้ใช้หยิบไปใช้ทันที' : 'ยังไม่พบบล็อก TL;DR ที่ชัดเจน',
-      fix: 'เพิ่ม TL;DR 3–5 ข้อไว้ก่อนเนื้อหาหลัก'
+      details: summaryBlock.found ? 'พบ summary block จริงช่วงต้นบทความ เช่น heading สรุป, bullet list หรือ section สรุป' : 'ยังไม่พบ summary block ชัดเจนช่วงต้นบทความ',
+      fix: 'เพิ่มบล็อกสรุป 3–5 ข้อไว้ก่อนหรือหลังบทนำ พร้อมหัวข้อ Summary / Key Takeaways / สรุป'
     },
     {
       id: 'answer-first',
@@ -463,32 +515,32 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
   }));
   const overallZoneSummary = buildOverallZoneSummary(zones);
 
-  const yoastItems: YoastItem[] = [
-    { id: 'yoast-title-length', label: 'SEO title length', status: titleLength >= 45 && titleLength <= 60 ? 'good' : titleLength >= 35 && titleLength <= 70 ? 'needs-work' : 'poor', details: `ความยาว title ${titleLength} ตัวอักษร`, value: titleLength },
-    { id: 'yoast-meta-length', label: 'Meta description length', status: metaDescriptionLength >= 120 && metaDescriptionLength <= 160 ? 'good' : metaDescriptionLength >= 80 && metaDescriptionLength <= 180 ? 'needs-work' : 'poor', details: `ความยาว meta description ${metaDescriptionLength} ตัวอักษร`, value: metaDescriptionLength },
-    { id: 'yoast-slug', label: 'Slug clarity', status: slugLength >= 8 && slugLength <= 75 && !slug.includes('_') ? 'good' : slugLength > 0 ? 'needs-work' : 'poor', details: slug ? `slug: /${slug}` : 'ไม่พบ slug ที่ชัดเจน', value: slug || '/' },
-    { id: 'yoast-focus-title', label: 'Keyphrase in SEO title', status: !focus ? 'needs-work' : keywordInTitle ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInTitle ? 'พบคีย์เวิร์ดใน title' : 'ไม่พบคีย์เวิร์ดใน title' },
-    { id: 'yoast-focus-description', label: 'Keyphrase in meta description', status: !focus ? 'needs-work' : keywordInDescription ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInDescription ? 'พบคีย์เวิร์ดใน meta description' : 'ไม่พบคีย์เวิร์ดใน meta description' },
-    { id: 'yoast-focus-intro', label: 'Keyphrase in introduction', status: !focus ? 'needs-work' : keywordInIntro ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInIntro ? 'พบคีย์เวิร์ดในบทนำ' : 'ไม่พบคีย์เวิร์ดในบทนำ' },
-    { id: 'yoast-focus-h1', label: 'Keyphrase in H1 / main heading', status: !focus ? 'needs-work' : keywordInH1 ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInH1 ? 'พบคีย์เวิร์ดใน H1' : 'ไม่พบคีย์เวิร์ดใน H1' },
-    { id: 'yoast-focus-subheading', label: 'Keyphrase in subheading', status: !focus ? 'needs-work' : keywordInSubheading ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInSubheading ? 'พบคีย์เวิร์ดใน H2/H3' : 'ไม่พบคีย์เวิร์ดใน H2/H3' },
-    { id: 'yoast-focus-slug', label: 'Keyphrase in slug', status: !focus ? 'needs-work' : keywordInSlug ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInSlug ? 'พบคีย์เวิร์ดใน slug' : 'ไม่พบคีย์เวิร์ดใน slug' },
-    { id: 'yoast-density', label: 'Keyword density', status: !focus ? 'needs-work' : keywordDensity >= 0.5 && keywordDensity <= 3 ? 'good' : keywordDensity > 0 && keywordDensity <= 4 ? 'needs-work' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : `ความหนาแน่น ${keywordDensity}% | พบ ${keywordOccurrences} ครั้ง`, value: `${keywordDensity}%` },
-    { id: 'yoast-text-length', label: 'Text length', status: bodyWordCount >= 600 ? 'good' : bodyWordCount >= 300 ? 'needs-work' : 'poor', details: `จำนวนคำ ${bodyWordCount} คำ`, value: bodyWordCount },
-    { id: 'yoast-alt', label: 'Image alt attributes', status: altCoverage >= 90 ? 'good' : altCoverage >= 60 ? 'needs-work' : 'poor', details: `รูปภาพที่มี alt ${imagesWithAlt}/${images} (${altCoverage}%)`, value: `${altCoverage}%` },
-    { id: 'yoast-alt-keyphrase', label: 'Keyphrase in image alt', status: !focus ? 'needs-work' : keywordInImageAlt ? 'good' : images > 0 ? 'needs-work' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInImageAlt ? 'พบคีย์เวิร์ดใน alt text' : images > 0 ? 'ยังไม่พบคีย์เวิร์ดใน alt text' : 'ไม่มีรูปภาพให้ตรวจ' },
-    { id: 'yoast-internal-links', label: 'Internal links', status: internalLinks.length >= 3 ? 'good' : internalLinks.length >= 1 ? 'needs-work' : 'poor', details: `internal links ${internalLinks.length}`, value: internalLinks.length },
-    { id: 'yoast-external-links', label: 'External links', status: externalLinks.length >= 1 ? 'good' : 'needs-work', details: `external links ${externalLinks.length}`, value: externalLinks.length },
-    { id: 'yoast-link-balance', label: 'Internal / external balance', status: internalLinks.length >= 2 && externalLinks.length >= 1 ? 'good' : internalLinks.length >= 1 ? 'needs-work' : 'poor', details: `internal/external ratio ${internalLinks.length}:${externalLinks.length}`, value: `${internalLinks.length}:${externalLinks.length}` },
-    { id: 'yoast-canonical', label: 'Canonical tag', status: canonical ? canonical === analyzedUrl ? 'good' : 'needs-work' : 'poor', details: canonical ? `canonical = ${canonical}` : 'ไม่พบ canonical tag', value: canonical || 'missing' },
-    { id: 'yoast-robots', label: 'Robots meta', status: robots ? /noindex|nofollow/i.test(robots) ? 'needs-work' : 'good' : 'poor', details: robots ? `robots = ${robots}` : 'ไม่พบ meta robots', value: robots || 'missing' },
-    { id: 'yoast-og', label: 'Open Graph completeness', status: ogTitle && ogDescription && ogImage ? 'good' : ogTitle || ogDescription ? 'needs-work' : 'poor', details: `og:title ${ogTitle ? '✓' : '✗'} | og:description ${ogDescription ? '✓' : '✗'} | og:image ${ogImage ? '✓' : '✗'} | og:url ${ogUrl ? '✓' : '✗'}` },
-    { id: 'yoast-twitter', label: 'Twitter Cards completeness', status: twitterCard && twitterTitle && twitterDescription ? 'good' : twitterCard || twitterTitle ? 'needs-work' : 'poor', details: `twitter:card ${twitterCard ? '✓' : '✗'} | title ${twitterTitle ? '✓' : '✗'} | description ${twitterDescription ? '✓' : '✗'} | image ${twitterImage ? '✓' : '✗'}` },
-    { id: 'yoast-headings', label: 'Heading hierarchy H1-H2-H3', status: h1Count === 1 && headingHierarchyIssues.length === 0 ? 'good' : h1Count >= 1 ? 'needs-work' : 'poor', details: `H1 ${h1Count} | H2 ${h2Count} | H3 ${h3Count}${headingHierarchyIssues.length ? ` | issues: ${headingHierarchyIssues.join('; ')}` : ''}` },
-    { id: 'yoast-schema', label: 'Schema coverage', status: hasArticleSchema && hasOrganizationSchema ? 'good' : schemaTypes.length > 0 ? 'needs-work' : 'poor', details: schemaTypes.length ? `พบ schema: ${schemaTypes.join(', ')}` : 'ไม่พบ JSON-LD schema' },
-    { id: 'yoast-readability', label: 'Readability', status: readabilityScore >= 75 ? 'good' : readabilityScore >= 55 ? 'needs-work' : 'poor', details: `คะแนน readability ${readabilityScore}/100 | ประโยคเฉลี่ย ${avgSentenceWords} คำ` }
-  ];
 
+const yoastItems: YoastItem[] = [
+  { id: 'yoast-title-length', label: 'SEO title length', status: titleLength >= 65 && titleLength <= 75 ? 'good' : titleLength >= 50 && titleLength < 65 ? 'needs-work' : 'poor', details: `ความยาว title ${titleLength} ตัวอักษร`, value: titleLength, suggestion: titleLength < 50 ? 'Title สั้นเกินไป ควรเพิ่มคำอธิบายหรือ benefit ให้ครบ' : titleLength > 75 ? 'Title ยาวเกินไป ควรตัดคำฟุ่มเฟือยออก' : titleLength < 65 ? 'Title ยังสั้นเล็กน้อย สามารถเพิ่มคำขยายได้อีก' : 'ความยาวกำลังดี', location: 'SEO title / <title>', nextStep: titleLength < 50 ? 'ขยาย title ให้ได้ 65–75 ตัวอักษร' : titleLength > 75 ? 'ย่อ title ให้ไม่เกิน 75 ตัวอักษร' : 'คงโครงสร้าง title นี้ไว้' },
+  { id: 'yoast-meta-length', label: 'Meta description length', status: metaDescriptionLength >= 120 && metaDescriptionLength <= 160 ? 'good' : metaDescriptionLength >= 80 && metaDescriptionLength <= 180 ? 'needs-work' : 'poor', details: `ความยาว meta description ${metaDescriptionLength} ตัวอักษร`, value: metaDescriptionLength, suggestion: metaDescriptionLength < 120 ? 'Meta description สั้นไป ยังเล่า benefit ไม่ครบ' : metaDescriptionLength > 160 ? 'Meta description ยาวไป เสี่ยงถูกตัดในผลค้นหา' : 'ความยาวใช้ได้', location: 'Meta description', nextStep: metaDescriptionLength < 120 ? 'เพิ่ม benefit และ CTA ให้ยาวขึ้นถึง 120–160 ตัวอักษร' : metaDescriptionLength > 160 ? 'ตัดคำซ้ำและย่อให้อยู่ในช่วง 120–160 ตัวอักษร' : 'รักษาโครงสร้างเดิมไว้' },
+  { id: 'yoast-slug', label: 'Slug clarity', status: slugLength >= 8 && slugLength <= 75 && !slug.includes('_') ? 'good' : slugLength > 0 ? 'needs-work' : 'poor', details: slug ? `slug: /${slug}` : 'ไม่พบ slug ที่ชัดเจน', value: slug || '/', suggestion: !slug ? 'ยังไม่มี slug ที่อ่านง่าย' : slug.includes('_') ? 'slug มี underscore ควรใช้ dash แทน' : 'slug ใช้งานได้', location: 'URL slug', nextStep: !slug ? 'ตั้ง slug ให้สั้น กระชับ และอ่านได้' : slug.includes('_') ? 'เปลี่ยน underscore เป็น dash (-)' : 'คง slug นี้ไว้' },
+  { id: 'yoast-focus-title', label: 'Keyphrase in SEO title', status: !focus ? 'needs-work' : keywordInTitle ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInTitle ? 'พบคีย์เวิร์ดใน title' : 'ไม่พบคีย์เวิร์ดใน title', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInTitle ? 'วางคีย์เวิร์ดใน title แล้ว' : 'ควรใส่คีย์เวิร์ดในช่วงต้น title', location: 'SEO title / <title>', nextStep: !focus ? 'กรอก focus keyword ของหน้านี้ก่อน' : keywordInTitle ? 'คง title เดิมไว้' : `เพิ่มคำว่า "${focus}" ใน title` },
+  { id: 'yoast-focus-description', label: 'Keyphrase in meta description', status: !focus ? 'needs-work' : keywordInDescription ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInDescription ? 'พบคีย์เวิร์ดใน meta description' : 'ไม่พบคีย์เวิร์ดใน meta description', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInDescription ? 'มีคีย์เวิร์ดใน meta แล้ว' : 'ควรใส่คีย์เวิร์ดใน meta description อย่างเป็นธรรมชาติ', location: 'Meta description', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInDescription ? 'คง meta เดิมไว้' : `เพิ่มคำว่า "${focus}" ใน meta description` },
+  { id: 'yoast-focus-intro', label: 'Keyphrase in introduction', status: !focus ? 'needs-work' : keywordInIntro ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInIntro ? 'พบคีย์เวิร์ดในบทนำ' : 'ไม่พบคีย์เวิร์ดในบทนำ', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInIntro ? 'บทนำรองรับคีย์เวิร์ดแล้ว' : 'ควรใส่คีย์เวิร์ดในย่อหน้าแรก ๆ', location: 'บทนำ / 100 คำแรก', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInIntro ? 'รักษาบทนำเดิมไว้' : `เพิ่มคำว่า "${focus}" ใน 1–2 ย่อหน้าแรก` },
+  { id: 'yoast-focus-h1', label: 'Keyphrase in H1 / main heading', status: !focus ? 'needs-work' : keywordInH1 ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInH1 ? 'พบคีย์เวิร์ดใน H1' : 'ไม่พบคีย์เวิร์ดใน H1', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInH1 ? 'H1 ใช้งานได้' : 'H1 ควรมีคีย์เวิร์ดหลัก', location: 'H1', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInH1 ? 'คง H1 เดิมไว้' : `ปรับ H1 ให้มีคำว่า "${focus}"` },
+  { id: 'yoast-focus-subheading', label: 'Keyphrase in subheading', status: !focus ? 'needs-work' : keywordInSubheading ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInSubheading ? 'พบคีย์เวิร์ดใน H2/H3' : 'ไม่พบคีย์เวิร์ดใน H2/H3', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInSubheading ? 'มีคีย์เวิร์ดในหัวข้อย่อยแล้ว' : 'ควรใส่คีย์เวิร์ดใน H2/H3 อย่างน้อย 1 จุด', location: 'H2 / H3', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInSubheading ? 'คงหัวข้อย่อยเดิมไว้' : `เพิ่มคำว่า "${focus}" ใน H2 หรือ H3 อย่างน้อย 1 หัวข้อ` },
+  { id: 'yoast-focus-slug', label: 'Keyphrase in slug', status: !focus ? 'needs-work' : keywordInSlug ? 'good' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInSlug ? 'พบคีย์เวิร์ดใน slug' : 'ไม่พบคีย์เวิร์ดใน slug', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInSlug ? 'slug รองรับคีย์เวิร์ดแล้ว' : 'ควรมีคีย์เวิร์ดอยู่ใน slug', location: 'URL slug', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInSlug ? 'คง slug เดิมไว้' : `พิจารณาเพิ่มคำหลักของ "${focus}" ใน slug` },
+  { id: 'yoast-density', label: 'Keyword density', status: !focus ? 'needs-work' : keywordDensity >= 0.5 && keywordDensity <= 3 ? 'good' : keywordDensity > 0 && keywordDensity <= 4 ? 'needs-work' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : `ความหนาแน่น ${keywordDensity}% | พบ ${keywordOccurrences} ครั้ง`, value: `${keywordDensity}%`, suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordDensity < 0.5 ? 'คีย์เวิร์ดยังน้อยเกินไป' : keywordDensity > 3 ? 'คีย์เวิร์ดเริ่มเยอะเกินไป' : 'ความหนาแน่นกำลังดี', location: 'ทั้งบทความ โดยเฉพาะ title / intro / H2 / conclusion', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordDensity < 0.5 ? 'เพิ่มคีย์เวิร์ดใน H2 และย่อหน้าสำคัญอีก 2–3 จุด' : keywordDensity > 3 ? 'ลดคำซ้ำในบางย่อหน้าเพื่อไม่ให้ดูยัด keyword' : 'คงโครงสร้างเดิมไว้' },
+  { id: 'yoast-text-length', label: 'Text length', status: bodyWordCount >= 600 ? 'good' : bodyWordCount >= 300 ? 'needs-work' : 'poor', details: `จำนวนคำ ${bodyWordCount} คำ`, value: bodyWordCount, suggestion: bodyWordCount < 300 ? 'เนื้อหายังสั้นเกินไปสำหรับบทความ SEO' : bodyWordCount < 600 ? 'เนื้อหาเริ่มใช้ได้ แต่ยังขยายเพิ่มได้' : 'ความยาวบทความเหมาะสม', location: 'เนื้อหาหลักของบทความ', nextStep: bodyWordCount < 300 ? 'ขยายเนื้อหาให้เกิน 600 คำ' : bodyWordCount < 600 ? 'เพิ่มตัวอย่าง, FAQ หรือ use case อีก 2–3 ส่วน' : 'คงความยาวนี้ไว้' },
+  { id: 'yoast-alt', label: 'Image alt attributes', status: altCoverage >= 90 ? 'good' : altCoverage >= 60 ? 'needs-work' : 'poor', details: `รูปภาพที่มี alt ${imagesWithAlt}/${images} (${altCoverage}%)`, value: `${altCoverage}%`, suggestion: images === 0 ? 'ไม่มีรูปภาพให้ตรวจ' : altCoverage < 90 ? 'ยังมีรูปที่ไม่มี alt text' : 'alt text ครบดีแล้ว', location: 'รูปภาพในบทความ', nextStep: images === 0 ? 'เพิ่มภาพประกอบถ้าจำเป็น' : altCoverage < 90 ? 'เติม alt text ให้ครบทุกภาพ' : 'รักษามาตรฐานนี้ไว้' },
+  { id: 'yoast-alt-keyphrase', label: 'Keyphrase in image alt', status: !focus ? 'needs-work' : keywordInImageAlt ? 'good' : images > 0 ? 'needs-work' : 'poor', details: !focus ? 'ยังไม่ได้ใส่ focus keyword' : keywordInImageAlt ? 'พบคีย์เวิร์ดใน alt text' : images > 0 ? 'ยังไม่พบคีย์เวิร์ดใน alt text' : 'ไม่มีรูปภาพให้ตรวจ', suggestion: !focus ? 'ยังไม่ได้กำหนดคีย์เวิร์ดหลัก' : keywordInImageAlt ? 'มีคีย์เวิร์ดใน alt แล้ว' : images > 0 ? 'ควรมี alt อย่างน้อย 1 รูปที่สอดคล้องกับคีย์เวิร์ด' : 'ไม่มีรูปภาพในบทความ', location: 'alt text ของภาพหลัก', nextStep: !focus ? 'กรอก focus keyword ก่อน' : keywordInImageAlt ? 'คง alt เดิมไว้' : images > 0 ? `เพิ่มคำว่า "${focus}" ใน alt ของรูปที่เกี่ยวข้อง 1 รูป` : 'เพิ่มภาพประกอบถ้าจำเป็น' },
+  { id: 'yoast-internal-links', label: 'Internal links', status: internalLinks.length >= 3 ? 'good' : internalLinks.length >= 1 ? 'needs-work' : 'poor', details: `internal links ${internalLinks.length}`, value: internalLinks.length, suggestion: internalLinks.length === 0 ? 'ยังไม่มี internal link' : internalLinks.length < 3 ? 'มี internal link แล้ว แต่ยังเพิ่มได้อีก' : 'internal link เพียงพอ', location: 'ช่วงกลางและท้ายบทความ', nextStep: internalLinks.length === 0 ? 'เพิ่ม internal link 2–3 ลิงก์ไปหน้าที่เกี่ยวข้อง' : internalLinks.length < 3 ? 'เพิ่ม internal link อีก 1–2 ลิงก์' : 'คงลิงก์เดิมไว้' },
+  { id: 'yoast-external-links', label: 'External links', status: externalLinks.length >= 1 ? 'good' : 'needs-work', details: `external links ${externalLinks.length}`, value: externalLinks.length, suggestion: externalLinks.length === 0 ? 'ยังไม่มี external link อ้างอิง' : 'มี external link แล้ว', location: 'ส่วนข้อมูลอ้างอิงหรือย่อหน้าที่มีสถิติ', nextStep: externalLinks.length === 0 ? 'เพิ่ม external link ไปยังแหล่งอ้างอิงที่น่าเชื่อถือ 1 จุด' : 'คงลิงก์อ้างอิงเดิมไว้' },
+  { id: 'yoast-link-balance', label: 'Internal / external balance', status: internalLinks.length >= 2 && externalLinks.length >= 1 ? 'good' : internalLinks.length >= 1 ? 'needs-work' : 'poor', details: `internal/external ratio ${internalLinks.length}:${externalLinks.length}`, value: `${internalLinks.length}:${externalLinks.length}`, suggestion: internalLinks.length < 2 ? 'สัดส่วน internal link ยังน้อย' : externalLinks.length < 1 ? 'ควรมี external link อย่างน้อย 1 จุด' : 'สมดุลลิงก์ใช้ได้', location: 'ทั้งบทความ', nextStep: internalLinks.length < 2 ? 'เพิ่ม internal link ให้ครบอย่างน้อย 2 ลิงก์' : externalLinks.length < 1 ? 'เพิ่ม external link ที่น่าเชื่อถือ 1 จุด' : 'รักษาสมดุลลิงก์นี้ไว้' },
+  { id: 'yoast-canonical', label: 'Canonical tag', status: canonical ? canonical === analyzedUrl ? 'good' : 'needs-work' : 'poor', details: canonical ? `canonical = ${canonical}` : 'ไม่พบ canonical tag', value: canonical || 'missing', suggestion: !canonical ? 'ยังไม่มี canonical tag' : canonical !== analyzedUrl ? 'canonical ไม่ตรงกับ URL ที่วิเคราะห์' : 'canonical ถูกต้อง', location: '<link rel="canonical">', nextStep: !canonical ? 'เพิ่ม canonical ของหน้านี้' : canonical !== analyzedUrl ? 'ปรับ canonical ให้ชี้ URL หลักของหน้า' : 'คง canonical นี้ไว้' },
+  { id: 'yoast-robots', label: 'Robots meta', status: robots ? /noindex|nofollow/i.test(robots) ? 'needs-work' : 'good' : 'poor', details: robots ? `robots = ${robots}` : 'ไม่พบ meta robots', value: robots || 'missing', suggestion: !robots ? 'ยังไม่มี meta robots' : /noindex|nofollow/i.test(robots) ? 'robots อาจบล็อกการจัดอันดับ' : 'robots ใช้ได้', location: 'meta robots', nextStep: !robots ? 'เพิ่ม meta robots ให้ชัดเจน' : /noindex|nofollow/i.test(robots) ? 'ตรวจว่าตั้ง noindex/nofollow ตั้งใจหรือไม่' : 'คงค่า robots เดิมไว้' },
+  { id: 'yoast-og', label: 'Open Graph completeness', status: ogTitle && ogDescription && ogImage ? 'good' : ogTitle || ogDescription ? 'needs-work' : 'poor', details: `og:title ${ogTitle ? '✓' : '✗'} | og:description ${ogDescription ? '✓' : '✗'} | og:image ${ogImage ? '✓' : '✗'} | og:url ${ogUrl ? '✓' : '✗'}`, suggestion: !ogTitle && !ogDescription && !ogImage ? 'ยังไม่มี Open Graph ที่ครบ' : 'Open Graph ใช้ได้ แต่ยังเช็กได้อีก', location: 'meta property="og:*"', nextStep: !ogTitle ? 'เพิ่ม og:title' : !ogDescription ? 'เพิ่ม og:description' : !ogImage ? 'เพิ่ม og:image' : 'คง Open Graph เดิมไว้' },
+  { id: 'yoast-headings', label: 'Heading hierarchy H1-H2-H3', status: h1Count === 1 && headingHierarchyIssues.length === 0 ? 'good' : h1Count >= 1 ? 'needs-work' : 'poor', details: `H1 ${h1Count} | H2 ${h2Count} | H3 ${h3Count}${headingHierarchyIssues.length ? ` | issues: ${headingHierarchyIssues.join('; ')}` : ''}`, suggestion: h1Count === 0 ? 'บทความยังไม่มี H1' : h1Count > 1 ? 'มี H1 มากกว่า 1 จุด' : headingHierarchyIssues.length ? 'ลำดับ heading ยังข้ามชั้น' : 'โครงสร้าง heading ใช้ได้', location: 'H1 / H2 / H3 ของบทความ', nextStep: h1Count === 0 ? 'เพิ่ม H1 เพียง 1 จุด' : h1Count > 1 ? 'ลดให้เหลือ H1 เดียว' : headingHierarchyIssues.length ? 'เรียง H2/H3 ใหม่ไม่ให้ข้ามระดับ' : 'คงโครงสร้างเดิมไว้' },
+  { id: 'yoast-schema', label: 'Schema coverage', status: hasArticleSchema && hasOrganizationSchema ? 'good' : schemaTypes.length > 0 ? 'needs-work' : 'poor', details: schemaTypes.length ? `พบ schema: ${schemaTypes.join(', ')}` : 'ไม่พบ JSON-LD schema', suggestion: schemaTypes.length === 0 ? 'ยังไม่มี schema' : !hasArticleSchema ? 'ควรมี Article schema' : !hasOrganizationSchema ? 'ควรมี Organization schema' : 'schema ใช้ได้', location: 'JSON-LD schema', nextStep: schemaTypes.length === 0 ? 'เพิ่ม Article หรือ Organization schema อย่างน้อย 1 แบบ' : !hasArticleSchema ? 'เพิ่ม Article schema' : !hasOrganizationSchema ? 'เพิ่ม Organization schema' : 'คง schema เดิมไว้' },
+  { id: 'yoast-readability', label: 'Readability', status: readabilityScore >= 75 ? 'good' : readabilityScore >= 55 ? 'needs-work' : 'poor', details: `คะแนน readability ${readabilityScore}/100 | ประโยคเฉลี่ย ${avgSentenceWords} คำ`, suggestion: readabilityScore < 55 ? 'ประโยคยาวหรือย่อหน้าหนักเกินไป' : readabilityScore < 75 ? 'อ่านได้ แต่ยังลื่นขึ้นได้อีก' : 'อ่านง่ายแล้ว', location: 'ทั้งบทความ โดยเฉพาะย่อหน้ายาว', nextStep: readabilityScore < 55 ? 'ตัดประโยคยาว แบ่งย่อหน้า และเพิ่ม bullet list' : readabilityScore < 75 ? 'ลดประโยคยาวบางส่วนและเพิ่ม subheading' : 'คงจังหวะการเขียนนี้ไว้' },
+  { id: 'yoast-summary', label: 'Summary block', status: summaryBlock.found ? 'good' : 'poor', details: summaryBlock.found ? 'พบ summary block ช่วงต้นบทความ' : 'ยังไม่พบบล็อกสรุปช่วงต้นบทความ', suggestion: summaryBlock.found ? 'มีบล็อกสรุปแล้ว' : 'ควรเพิ่ม summary block 3–5 ข้อช่วงต้นบทความ', location: 'ก่อนหรือหลังบทนำ', nextStep: summaryBlock.found ? 'คงรูปแบบ summary นี้ไว้' : 'เพิ่มหัวข้อ Summary / Key Takeaways / สรุป พร้อม bullet list 3–5 ข้อ' }
+];
   const yoastPoints = yoastItems.reduce((sum, item) => {
     if (item.status === 'good') return sum + 1;
     if (item.status === 'needs-work') return sum + 0.5;
@@ -513,11 +565,31 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
     }))
   ];
 
-  const quickWins = quickWinPool
-    .filter((item) => item.score / item.maxScore < 0.8)
-    .sort((a, b) => a.score / a.maxScore - b.score / b.maxScore)
-    .slice(0, 7)
-    .map((item) => `${item.label}: ${item.details}`);
+
+const actionPlan: ActionPlanItem[] = [
+  ...yoastItems
+    .filter((item) => item.status !== 'good')
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      priority: item.status === 'poor' ? 'High' as const : 'Medium' as const,
+      missing: item.suggestion || item.details,
+      location: item.location || 'ดูทั้งบทความ',
+      nextStep: item.nextStep || item.details
+    })),
+  ...zones.flatMap((zone) => zone.items.filter((item) => item.status !== 'good').map((item) => ({
+    id: `${zone.zone}-${item.id}`,
+    label: item.label,
+    priority: item.status === 'poor' ? 'High' as const : 'Medium' as const,
+    missing: item.details,
+    location: zone.title,
+    nextStep: item.fix
+  })))
+]
+  .sort((a, b) => (a.priority === b.priority ? 0 : a.priority === 'High' ? -1 : 1))
+  .slice(0, 8);
+
+const quickWins = actionPlan.slice(0, 5).map((item) => `${item.label}: ${item.nextStep}`);
 
   return {
     analyzedUrl,
@@ -530,6 +602,7 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
     zones,
     overallZoneSummary,
     yoastItems,
+    actionPlan,
     quickWins,
     raw: {
       canonical,
@@ -558,17 +631,12 @@ export function analyzeHtml(html: string, analyzedUrl: string, focusKeyword = ''
       hasFaqSchema,
       hasBreadcrumbSchema,
       hasOrganizationSchema,
+      hasSummaryBlock: summaryBlock.found,
       og: {
         title: Boolean(ogTitle),
         description: Boolean(ogDescription),
         image: Boolean(ogImage),
         url: Boolean(ogUrl)
-      },
-      twitter: {
-        card: Boolean(twitterCard),
-        title: Boolean(twitterTitle),
-        description: Boolean(twitterDescription),
-        image: Boolean(twitterImage)
       },
       focusKeyword: focus,
       keywordOccurrences,
