@@ -2,14 +2,14 @@ import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 const protectedRoutes = ["/", "/api/analyze", "/api/export"];
-const publicRoutes = ["/login"];
+const publicRoutes = ["/login", "/api/auth"];
 
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const session = await auth();
 
-  if (publicRoutes.includes(pathname)) {
+  if (publicRoutes.some(route => pathname.startsWith(route))) {
     return NextResponse.next();
   }
 
