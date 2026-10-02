@@ -7,6 +7,8 @@ import { AlertCircle, CheckCircle2, ChevronRight, FileText, Gauge, LayoutList, P
 type ExportFormat = 'csv' | 'docx';
 type UrlKeywordRow = { id: number; url: string; keyword: string };
 
+const MAX_ROWS = 12;
+
 function scoreTone(score: number) {
   if (score >= 80) {
     return {
@@ -187,7 +189,7 @@ export default function SeoDashboard() {
     [results, selectedUrl]
   );
   const activeRows = useMemo(
-    () => rows.map((row) => ({ ...row, url: row.url.trim(), keyword: row.keyword.trim() })).filter((row) => row.url).slice(0, 5),
+    () => rows.map((row) => ({ ...row, url: row.url.trim(), keyword: row.keyword.trim() })).filter((row) => row.url).slice(0, MAX_ROWS),
     [rows]
   );
 
@@ -210,7 +212,7 @@ export default function SeoDashboard() {
 
   function addRow() {
     setRows((current) => {
-      if (current.length >= 5) return current;
+      if (current.length >= MAX_ROWS) return current;
       const nextId = current.length ? Math.max(...current.map((row) => row.id)) + 1 : 1;
       return [...current, { id: nextId, url: '', keyword: '' }];
     });
@@ -290,13 +292,13 @@ export default function SeoDashboard() {
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-5xl">วิเคราะห์บทความหลาย URL แบบเรียบง่าย ใช้งานไว และอ่านผลลัพธ์ง่าย</h1>
               <p className="mt-4 text-base leading-7 text-slate-400 md:text-lg">
-                ใส่ URL และ keyword เป็นคู่กันได้สูงสุด 5 แถว จากนั้นดูคะแนนรวม รายการที่ต้องแก้ และ action plan ที่พร้อมลงมือทำต่อได้ทันที
+                ใส่ URL และ keyword เป็นคู่กันได้สูงสุด {MAX_ROWS} แถว จากนั้นดูคะแนนรวม รายการที่ต้องแก้ และ action plan ที่พร้อมลงมือทำต่อได้ทันที
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
                 <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Rows</div>
-                <div className="mt-2 text-2xl font-semibold">{rows.length}/5</div>
+                <div className="mt-2 text-2xl font-semibold">{rows.length}/{MAX_ROWS}</div>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
                 <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Ready</div>
@@ -318,7 +320,7 @@ export default function SeoDashboard() {
               <button
                 type="button"
                 onClick={addRow}
-                disabled={rows.length >= 5}
+                disabled={rows.length >= MAX_ROWS}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 text-sm font-medium text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" /> เพิ่มแถว

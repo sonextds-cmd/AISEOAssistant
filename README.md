@@ -3,7 +3,7 @@
 เว็บแอพสำหรับตรวจ SEO และ AI-friendly content structure แบบ Yoast-style พร้อมเปรียบเทียบหลาย URL ในหน้าเดียว
 
 ## Features
-- วิเคราะห์ได้สูงสุด 5 URL ต่อรอบ
+- วิเคราะห์ได้สูงสุด 12 URL ต่อรอบ
 - Focus Keyword แบบ Yoast
 - ตรวจ Title / Meta Description / Slug / Alt text / Internal-External links
 - ตรวจ Canonical / Robots / Open Graph / Twitter Cards
