@@ -34,8 +34,19 @@ export async function POST(req: NextRequest) {
     });
 
     if (response.status === 403 || response.status === 429) {
+      const body = await response.text().catch(() => '');
+      const pageTitle = body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? '';
+      const blockedBy = response.headers.get('cf-mitigated')
+        ? `Cloudflare (${response.headers.get('cf-mitigated')})`
+        : response.headers.get('server') || 'unknown';
       return NextResponse.json(
-        { error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — ตรวจสอบว่า Cloudflare/Firewall หรือปลั๊กอินความปลอดภัยไม่ได้บล็อก bot หรือ IP ของ Vercel` },
+        {
+          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — ตรวจสอบว่า Cloudflare/Firewall หรือปลั๊กอินความปลอดภัยไม่ได้บล็อก bot หรือ IP ของ Vercel`,
+          blockedBy,
+          cfRay: response.headers.get('cf-ray'),
+          pageTitle,
+          bodySnippet: body.replace(/\s+/g, ' ').slice(0, 300)
+        },
         { status: 400 }
       );
     }
