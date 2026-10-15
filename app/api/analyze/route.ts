@@ -4,6 +4,16 @@ import { analyzeHtml } from '@/lib/analyzer';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const BROWSER_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Cache-Control': 'no-cache',
+  Pragma: 'no-cache',
+  'Upgrade-Insecure-Requests': '1'
+};
+
 function normalizeUrl(input: string) {
   const trimmed = input.trim();
   if (!trimmed) throw new Error('กรุณาใส่ URL');
@@ -18,12 +28,17 @@ export async function POST(req: NextRequest) {
     const target = new URL(normalizedUrl);
 
     const response = await fetch(target.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AI-SEO-Assistant/2.0; +https://vercel.com)'
-      },
+      headers: BROWSER_HEADERS,
       redirect: 'follow',
       cache: 'no-store'
     });
+
+    if (response.status === 403 || response.status === 429) {
+      return NextResponse.json(
+        { error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — ตรวจสอบว่า Cloudflare/Firewall หรือปลั๊กอินความปลอดภัยไม่ได้บล็อก bot หรือ IP ของ Vercel` },
+        { status: 400 }
+      );
+    }
 
     if (!response.ok) {
       return NextResponse.json({ error: `ไม่สามารถดึงหน้าเว็บได้ (${response.status})` }, { status: 400 });
