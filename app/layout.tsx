@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'AI SEO Work Assistant',
+  title: 'SO Rankly',
   description: 'AI SEO checker inspired by Yoast SEO and modern AI-search content structure principles.'
 };
 

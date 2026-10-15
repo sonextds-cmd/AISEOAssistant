@@ -13,7 +13,13 @@ function escapeCsv(value: unknown) {
 }
 
 export async function POST(req: NextRequest) {
-  const { analyses } = (await req.json()) as { analyses?: AnalysisResult[] };
+  let analyses: AnalysisResult[] | undefined;
+  try {
+    const body = await req.json();
+    analyses = body.analyses;
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
 
   if (!Array.isArray(analyses) || analyses.length === 0) {
     return NextResponse.json({ error: 'ไม่มีข้อมูลสำหรับ export' }, { status: 400 });
@@ -72,7 +78,7 @@ export async function POST(req: NextRequest) {
     ])
   ];
 
-  const content = rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
+  const content = '﻿' + rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
 
   return new NextResponse(content, {
     headers: {

@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
+import { LogoFull } from "@/components/Logo";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -35,94 +36,79 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">AI SEO Assistant</h1>
-          <p className="text-gray-600">เข้าสู่ระบบเพื่อเริ่มใช้งาน</p>
+    <div className="min-h-screen bg-ios-bg px-4 py-16 text-ios-label">
+      <div className="mx-auto w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <LogoFull width={240} className="mx-auto mb-5" />
+          <h1 className="sr-only">SO Rankly</h1>
+          <p className="mt-1 text-[15px] text-ios-secondary">เข้าสู่ระบบเพื่อเริ่มใช้งาน</p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+          <div className="mb-4 rounded-[14px] bg-ios-red/10 px-4 py-3 text-[15px] text-ios-red">
             {error}
           </div>
         )}
 
+        {/* Azure AD Button */}
+        <button
+          onClick={handleAzureLogin}
+          disabled={loading}
+          className="flex h-[52px] w-full items-center justify-center gap-3 rounded-[14px] border border-[#8C8C8C]/40 bg-white text-[17px] font-semibold text-[#5E5E5E] shadow-sm transition active:scale-[0.98] active:opacity-80 disabled:opacity-50"
+        >
+          {loading ? (
+            <>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#5E5E5E] border-t-transparent"></div>
+              กำลังเข้าสู่ระบบ...
+            </>
+          ) : (
+            <>
+              <svg className="h-5 w-5" viewBox="0 0 21 21" aria-hidden="true">
+                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+              </svg>
+              เข้าสู่ระบบด้วย Microsoft
+            </>
+          )}
+        </button>
+
+        <div className="my-6 flex items-center gap-3 text-[13px] text-ios-secondary">
+          <div className="h-px flex-1 bg-ios-separator"></div>
+          หรือใช้อีเมลและรหัสผ่าน
+          <div className="h-px flex-1 bg-ios-separator"></div>
+        </div>
+
         {/* Credentials Form */}
-        <form onSubmit={handleCredentialsLogin} className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Username (Email)
-            </label>
+        <form onSubmit={handleCredentialsLogin}>
+          <div className="divide-y divide-ios-separator overflow-hidden rounded-[14px] bg-white">
             <input
               type="email"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="user@example.com"
+              placeholder="อีเมล"
               disabled={loading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="h-12 w-full bg-transparent px-4 text-[17px] outline-none placeholder:text-ios-tertiary"
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="รหัสผ่าน"
               disabled={loading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="h-12 w-full bg-transparent px-4 text-[17px] outline-none placeholder:text-ios-tertiary"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading || !username || !password}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200"
+            className="mt-4 h-[52px] w-full rounded-[14px] bg-ios-blue text-[17px] font-semibold text-white transition active:scale-[0.98] active:opacity-80 disabled:bg-ios-blue/40"
           >
             {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </button>
         </form>
-
-        {/* Divider */}
-        <div className="relative mb-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-300"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-white text-gray-500">หรือ</span>
-          </div>
-        </div>
-
-        {/* Azure AD Button */}
-        <button
-          onClick={handleAzureLogin}
-          disabled={loading}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <>
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              กำลังเข้าสู่ระบบ...
-            </>
-          ) : (
-            <>
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 0a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" />
-              </svg>
-              เข้าสู่ระบบด้วย Azure AD
-            </>
-          )}
-        </button>
-
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-          <p className="text-xs text-gray-600 text-center">
-            ใช้บัญชี Azure AD ของคุณ หรือกรอก username/password ด้านบน
-          </p>
-        </div>
       </div>
     </div>
   );

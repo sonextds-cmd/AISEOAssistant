@@ -3,19 +3,17 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html, body {
   min-height: 100%;
-  background: #020617;
+  background: #F2F2F7;
 }
 
 body {
-  @apply text-slate-100 antialiased;
-  background-image:
-    radial-gradient(circle at top, rgba(34, 211, 238, 0.15), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.12), transparent 30%);
+  @apply font-sans text-ios-label antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {

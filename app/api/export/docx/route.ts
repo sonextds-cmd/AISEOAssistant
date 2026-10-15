@@ -17,14 +17,20 @@ function statusText(value: unknown) {
 }
 
 export async function POST(req: NextRequest) {
-  const { analyses } = (await req.json()) as { analyses?: AnalysisResult[] };
+  let analyses: AnalysisResult[] | undefined;
+  try {
+    const body = await req.json();
+    analyses = body.analyses;
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
 
   if (!Array.isArray(analyses) || analyses.length === 0) {
     return NextResponse.json({ error: 'ไม่มีข้อมูลสำหรับ export' }, { status: 400 });
   }
 
   const children: FileChild[] = [
-    new Paragraph({ text: 'AI SEO Assistant Report', heading: HeadingLevel.TITLE, spacing: { after: 240 } }),
+    new Paragraph({ text: 'SO Rankly Report', heading: HeadingLevel.TITLE, spacing: { after: 240 } }),
     new Paragraph({ text: `Total URLs analyzed: ${analyses.length}`, spacing: { after: 240 } })
   ];
 

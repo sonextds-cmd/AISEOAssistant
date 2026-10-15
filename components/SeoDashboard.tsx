@@ -1,38 +1,26 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ClipboardEvent, type ReactNode } from 'react';
 import type { ActionPlanItem, AnalysisResult, CheckItem, Status, YoastItem } from '@/lib/analyzer';
-import { AlertCircle, CheckCircle2, ChevronRight, FileText, Gauge, LayoutList, Plus, Search, Table2, Trash2 } from 'lucide-react';
+import { Logo } from '@/components/Logo';
+import { AlertCircle, ChevronRight, FileText, Minus, Plus, Sparkles, Table2 } from 'lucide-react';
 
 type ExportFormat = 'csv' | 'docx';
 type UrlKeywordRow = { id: number; url: string; keyword: string };
+type DetailTab = 'todo' | 'detail';
+
+const MAX_ROWS = 12;
 
 function scoreTone(score: number) {
-  if (score >= 80) {
-    return {
-      badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
-      text: 'text-emerald-300',
-      bar: 'bg-emerald-400'
-    };
-  }
-  if (score >= 55) {
-    return {
-      badge: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
-      text: 'text-amber-300',
-      bar: 'bg-amber-400'
-    };
-  }
-  return {
-    badge: 'border-rose-500/20 bg-rose-500/10 text-rose-300',
-    text: 'text-rose-300',
-    bar: 'bg-rose-400'
-  };
+  if (score >= 80) return { color: '#34C759', text: 'text-ios-green', soft: 'bg-ios-green/10 text-ios-green', label: 'ดีมาก' };
+  if (score >= 55) return { color: '#FF9500', text: 'text-ios-orange', soft: 'bg-ios-orange/10 text-ios-orange', label: 'พอใช้' };
+  return { color: '#FF3B30', text: 'text-ios-red', soft: 'bg-ios-red/10 text-ios-red', label: 'ต้องปรับ' };
 }
 
-function statusTone(status: Status) {
-  if (status === 'good') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
-  if (status === 'needs-work') return 'border-amber-500/20 bg-amber-500/10 text-amber-300';
-  return 'border-rose-500/20 bg-rose-500/10 text-rose-300';
+function statusColor(status: Status) {
+  if (status === 'good') return 'bg-ios-green';
+  if (status === 'needs-work') return 'bg-ios-orange';
+  return 'bg-ios-red';
 }
 
 function statusLabel(status: Status) {
@@ -41,117 +29,88 @@ function statusLabel(status: Status) {
   return 'ต้องแก้';
 }
 
-function YoastLight({ label }: { label: AnalysisResult['yoastLabel'] }) {
-  const map = {
-    Green: 'bg-emerald-400',
-    Orange: 'bg-amber-400',
-    Red: 'bg-rose-400'
-  } as const;
-  return <span className={`inline-block h-3 w-3 rounded-full ${map[label]}`} />;
-}
-
-function MetricBar({ value }: { value: number }) {
+function ScoreRing({ score, size = 120, stroke = 12 }: { score: number; size?: number; stroke?: number }) {
+  const value = Math.max(0, Math.min(100, score));
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
   const tone = scoreTone(value);
   return (
-    <div className="space-y-2">
-      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-        <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#E5E5EA" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={tone.color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - value / 100)}
+          className="transition-[stroke-dashoffset] duration-700"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="font-semibold tracking-tight text-ios-label" style={{ fontSize: size * 0.3 }}>{value}</span>
       </div>
-      <div className={`text-sm font-medium ${tone.text}`}>{value}/100</div>
     </div>
   );
 }
 
-function ScoreCard({ title, score, subtitle }: { title: string; score: number; subtitle: string }) {
-  const tone = scoreTone(score);
+function SectionHeader({ children }: { children: ReactNode }) {
+  return <div className="px-4 pb-2 pt-6 text-[13px] uppercase tracking-wide text-ios-secondary">{children}</div>;
+}
+
+function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`overflow-hidden rounded-[20px] bg-white ${className}`}>{children}</div>;
+}
+
+function MiniStat({ label, value, tone }: { label: string; value: ReactNode; tone?: string }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm text-slate-400">{title}</div>
-          <div className="mt-2 text-4xl font-semibold text-white">{score}</div>
-          <div className="mt-1 text-sm text-slate-500">{subtitle}</div>
+    <div className="flex-1 rounded-2xl bg-ios-bg px-3 py-3 text-center">
+      <div className={`text-xl font-semibold ${tone ?? 'text-ios-label'}`}>{value}</div>
+      <div className="mt-0.5 text-xs text-ios-secondary">{label}</div>
+    </div>
+  );
+}
+
+function ActionRow({ item, index }: { item: ActionPlanItem; index: number }) {
+  return (
+    <div className="flex gap-3 px-4 py-4">
+      <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${item.priority === 'High' ? 'bg-ios-red' : 'bg-ios-orange'}`}>
+        {index + 1}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[17px] font-medium text-ios-label">{item.label}</div>
+        <div className="mt-1 text-[15px] leading-6 text-ios-secondary">{item.missing}</div>
+        <div className="mt-2 rounded-xl bg-ios-blue/10 px-3 py-2 text-[15px] leading-6 text-ios-label">
+          <span className="font-medium text-ios-blue">ทำต่อ: </span>{item.nextStep}
         </div>
-        <div className={`rounded-full border px-3 py-1 text-xs font-medium ${tone.badge}`}>{score >= 80 ? 'Strong' : score >= 55 ? 'Average' : 'Needs work'}</div>
-      </div>
-      <div className="mt-4">
-        <MetricBar value={score} />
+        <div className="mt-1.5 text-[13px] text-ios-secondary">ตำแหน่ง: {item.location}</div>
       </div>
     </div>
   );
 }
 
-function ActionPlanCard({ item }: { item: ActionPlanItem }) {
-  const badge = item.priority === 'High'
-    ? 'border-rose-500/20 bg-rose-500/10 text-rose-300'
-    : 'border-amber-500/20 bg-amber-500/10 text-amber-300';
-
+function CheckRow({ label, details, status, note, right }: { label: string; details: string; status: Status; note?: string; right?: string }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-base font-semibold text-white">{item.label}</div>
-        <div className={`rounded-full border px-3 py-1 text-xs font-medium ${badge}`}>{item.priority}</div>
-      </div>
-      <div className="mt-4 space-y-3 text-sm leading-6">
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-slate-200"><span className="font-semibold text-white">ขาดอะไร:</span> {item.missing}</div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-slate-200"><span className="font-semibold text-white">ควรแก้ตรงไหน:</span> {item.location}</div>
-        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-cyan-100"><span className="font-semibold">ต้องทำอะไรต่อ:</span> {item.nextStep}</div>
-      </div>
-    </div>
-  );
-}
-
-function ZoneItemCard({ item }: { item: CheckItem }) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold text-white">{item.label}</div>
-          <div className="mt-2 text-sm leading-6 text-slate-300">{item.details}</div>
+    <div className="flex gap-3 px-4 py-3.5">
+      <span className={`mt-2 h-2.5 w-2.5 shrink-0 rounded-full ${statusColor(status)}`} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-[16px] font-medium text-ios-label">{label}</div>
+          <div className="shrink-0 text-[13px] text-ios-secondary">{right ?? statusLabel(status)}</div>
         </div>
-        <div className={`rounded-full border px-3 py-1 text-xs font-medium ${statusTone(item.status)}`}>{item.score}/{item.maxScore}</div>
-      </div>
-      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm leading-6 text-slate-200">
-        <span className="font-semibold text-white">วิธีแก้:</span> {item.fix}
+        <div className="mt-0.5 text-[14px] leading-6 text-ios-secondary">{details}</div>
+        {note ? <div className="mt-1 text-[14px] leading-6 text-ios-blue">{note}</div> : null}
       </div>
     </div>
   );
 }
 
-function PriorityChecklist({ items }: { items: YoastItem[] }) {
-  const visibleItems = items.filter((item) => item.status !== 'good');
-
-  if (visibleItems.length === 0) {
-    return (
-      <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5 text-sm text-slate-300">
-        ทุกจุดสำคัญผ่านเกณฑ์แล้ว
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-lg font-semibold text-white">Priority fixes</div>
-          <div className="mt-1 text-sm text-slate-400">แสดงเฉพาะรายการที่ยังต้องแก้หรือควรปรับ</div>
-        </div>
-        <div className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300">{visibleItems.length} items</div>
-      </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {visibleItems.map((item) => (
-          <div key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-white">{item.label}</div>
-              <div className={`rounded-full border px-3 py-1 text-xs font-medium ${statusTone(item.status)}`}>{statusLabel(item.status)}</div>
-            </div>
-            <div className="mt-2 text-sm leading-6 text-slate-300">{item.details}</div>
-            {item.suggestion ? <div className="mt-3 text-sm leading-6 text-cyan-100">→ {item.suggestion}</div> : null}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function Divided({ children }: { children: ReactNode[] }) {
+  return <div className="divide-y divide-ios-separator">{children}</div>;
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -165,12 +124,14 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(blobUrl);
 }
 
-export default function SeoDashboard() {
+export default function SeoDashboard({ userMenu }: { userMenu?: ReactNode }) {
   const [rows, setRows] = useState<UrlKeywordRow[]>([{ id: 1, url: '', keyword: '' }]);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [selectedUrl, setSelectedUrl] = useState('');
+  const [tab, setTab] = useState<DetailTab>('todo');
 
   useEffect(() => {
     if (results.length === 0) {
@@ -187,22 +148,9 @@ export default function SeoDashboard() {
     [results, selectedUrl]
   );
   const activeRows = useMemo(
-    () => rows.map((row) => ({ ...row, url: row.url.trim(), keyword: row.keyword.trim() })).filter((row) => row.url).slice(0, 5),
+    () => rows.map((row) => ({ ...row, url: row.url.trim(), keyword: row.keyword.trim() })).filter((row) => row.url).slice(0, MAX_ROWS),
     [rows]
   );
-
-  const compareRows = useMemo(() => {
-    return results.map((item) => ({
-      url: item.analyzedUrl,
-      keyword: String(item.raw.focusKeyword ?? ''),
-      overall: item.overallScore,
-      yoast: item.yoastScore,
-      readability: Number(item.raw.readabilityScore ?? 0),
-      wordCount: Number(item.raw.wordCount ?? 0),
-      titleLength: Number(item.raw.titleLength ?? 0),
-      isSelected: item.analyzedUrl === selectedUrl
-    }));
-  }, [results, selectedUrl]);
 
   function updateRow(id: number, field: 'url' | 'keyword', value: string) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
@@ -210,7 +158,7 @@ export default function SeoDashboard() {
 
   function addRow() {
     setRows((current) => {
-      if (current.length >= 5) return current;
+      if (current.length >= MAX_ROWS) return current;
       const nextId = current.length ? Math.max(...current.map((row) => row.id)) + 1 : 1;
       return [...current, { id: nextId, url: '', keyword: '' }];
     });
@@ -220,6 +168,25 @@ export default function SeoDashboard() {
     setRows((current) => {
       if (current.length === 1) return [{ ...current[0], url: '', keyword: '' }];
       return current.filter((row) => row.id !== id);
+    });
+  }
+
+  // Pasting several links at once (one per line) fills multiple rows.
+  function handleUrlPaste(id: number, event: ClipboardEvent<HTMLInputElement>) {
+    const lines = event.clipboardData.getData('text').split(/[\r\n\s]+/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    event.preventDefault();
+    setRows((current) => {
+      const index = current.findIndex((row) => row.id === id);
+      const next = [...current];
+      let nextId = Math.max(...current.map((row) => row.id)) + 1;
+      lines.forEach((url, offset) => {
+        const target = index + offset;
+        if (target >= MAX_ROWS) return;
+        if (next[target]) next[target] = { ...next[target], url };
+        else next.push({ id: nextId++, url, keyword: '' });
+      });
+      return next;
     });
   }
 
@@ -239,22 +206,39 @@ export default function SeoDashboard() {
 
   async function handleAnalyze() {
     if (activeRows.length === 0) {
-      setError('กรุณาใส่ URL อย่างน้อย 1 รายการ');
+      setError('กรุณาใส่ลิงก์อย่างน้อย 1 รายการ');
       return;
     }
 
+    setLoading(true);
+    setProgress(0);
+    setError('');
+
     try {
-      setLoading(true);
-      setError('');
+      const settled = await Promise.allSettled(
+        activeRows.map((row) => analyzeOne(row.url, row.keyword).finally(() => setProgress((count) => count + 1)))
+      );
+
       const analyzed: AnalysisResult[] = [];
-      for (const row of activeRows) {
-        const data = await analyzeOne(row.url, row.keyword);
-        analyzed.push(data);
+      const errors: string[] = [];
+
+      for (const result of settled) {
+        if (result.status === 'fulfilled') {
+          analyzed.push(result.value);
+        } else {
+          errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        }
       }
-      analyzed.sort((a, b) => b.overallScore - a.overallScore);
-      setResults(analyzed);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+
+      if (analyzed.length > 0) {
+        analyzed.sort((a, b) => b.overallScore - a.overallScore);
+        setResults(analyzed);
+        setTab('todo');
+      }
+
+      if (errors.length > 0) {
+        setError(errors.join(' | '));
+      }
     } finally {
       setLoading(false);
     }
@@ -276,269 +260,266 @@ export default function SeoDashboard() {
     }
 
     const blob = await response.blob();
-    downloadBlob(blob, format === 'csv' ? 'ai-seo-report.csv' : 'ai-seo-report.docx');
+    downloadBlob(blob, format === 'csv' ? 'so-rankly-report.csv' : 'so-rankly-report.docx');
   }
 
-  return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-6xl px-4 py-8 md:px-6 lg:px-8">
-        <section className="rounded-3xl border border-slate-800  p-6 md:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-cyan-200">
-                <Gauge className="h-4 w-4" /> SEO Content Auditor
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-5xl">วิเคราะห์บทความหลาย URL แบบเรียบง่าย ใช้งานไว และอ่านผลลัพธ์ง่าย</h1>
-              <p className="mt-4 text-base leading-7 text-slate-400 md:text-lg">
-                ใส่ URL และ keyword เป็นคู่กันได้สูงสุด 5 แถว จากนั้นดูคะแนนรวม รายการที่ต้องแก้ และ action plan ที่พร้อมลงมือทำต่อได้ทันที
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Rows</div>
-                <div className="mt-2 text-2xl font-semibold">{rows.length}/5</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Ready</div>
-                <div className="mt-2 text-2xl font-semibold">{activeRows.length}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-slate-500">Mode</div>
-                <div className="mt-2 text-sm font-medium text-cyan-200">Modern audit</div>
-              </div>
-            </div>
-          </div>
+  const issues: YoastItem[] = primary ? primary.yoastItems.filter((item) => item.status !== 'good') : [];
 
-          <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950 p-5 md:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">URL + Keyword pairs</div>
-                <div className="mt-1 text-sm text-slate-400">เพิ่มหรือลบแถวได้ตามต้องการ ระบบจะวิเคราะห์เฉพาะแถวที่มี URL</div>
+  return (
+    <main className="min-h-screen bg-ios-bg pb-16 text-ios-label">
+      {/* Navigation bar */}
+      <header className="sticky top-0 z-20 border-b border-ios-separator/70 bg-ios-bg/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
+          <Logo />
+          {userMenu}
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-2xl px-4">
+        <h1 className="pt-6 text-[34px] font-bold leading-tight tracking-tight">เช็คบทความ</h1>
+        <p className="mt-1 text-[17px] text-ios-secondary">วางลิงก์บทความ แล้วกด “เช็คเลย”</p>
+
+        {/* Input list */}
+        <SectionHeader>ลิงก์บทความ ({rows.length}/{MAX_ROWS})</SectionHeader>
+        <Card>
+          <div className="divide-y divide-ios-separator">
+            {rows.map((row, index) => (
+              <div key={row.id} className="flex items-center gap-3 py-2 pl-4 pr-3">
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-ios-red text-white transition active:scale-90"
+                  aria-label={`ลบลิงก์ ${index + 1}`}
+                >
+                  <Minus className="h-3.5 w-3.5" strokeWidth={3} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <input
+                    value={row.url}
+                    onChange={(e) => updateRow(row.id, 'url', e.target.value)}
+                    onPaste={(e) => handleUrlPaste(row.id, e)}
+                    placeholder="https://example.com/article"
+                    inputMode="url"
+                    className="h-9 w-full bg-transparent text-[17px] outline-none placeholder:text-ios-tertiary"
+                  />
+                  <input
+                    value={row.keyword}
+                    onChange={(e) => updateRow(row.id, 'keyword', e.target.value)}
+                    placeholder="คีย์เวิร์ด (ไม่บังคับ)"
+                    className="h-7 w-full bg-transparent text-[15px] text-ios-secondary outline-none placeholder:text-ios-tertiary"
+                  />
+                </div>
               </div>
+            ))}
+            {rows.length < MAX_ROWS ? (
               <button
                 type="button"
                 onClick={addRow}
-                disabled={rows.length >= 5}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 text-sm font-medium text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-[17px] text-ios-blue transition active:bg-ios-bg"
               >
-                <Plus className="h-4 w-4" /> เพิ่มแถว
+                <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-ios-green text-white">
+                  <Plus className="h-3.5 w-3.5" strokeWidth={3} />
+                </span>
+                เพิ่มลิงก์
               </button>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {rows.map((row, index) => (
-                <div key={row.id} className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 lg:grid-cols-[1fr_260px_56px]">
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.16em] text-slate-500">URL {index + 1}</label>
-                    <input
-                      value={row.url}
-                      onChange={(e) => updateRow(row.id, 'url', e.target.value)}
-                      placeholder="https://example.com/article"
-                      className="mt-2 h-12 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm outline-none placeholder:text-slate-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.16em] text-slate-500">Keyword</label>
-                    <input
-                      value={row.keyword}
-                      onChange={(e) => updateRow(row.id, 'keyword', e.target.value)}
-                      placeholder="primary keyword"
-                      className="mt-2 h-12 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm outline-none placeholder:text-slate-600"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      onClick={() => removeRow(row.id)}
-                      className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 text-slate-300 transition hover:bg-slate-800"
-                      aria-label={`ลบ URL ${index + 1}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-400">พร้อมวิเคราะห์ {activeRows.length} URL</div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={handleAnalyze}
-                  disabled={loading}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Search className="h-4 w-4" />
-                  {loading ? 'กำลังวิเคราะห์...' : 'Analyze'}
-                </button>
-                <button
-                  onClick={() => handleExport('csv')}
-                  disabled={results.length === 0}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-medium text-white disabled:opacity-40"
-                >
-                  <Table2 className="h-4 w-4" /> CSV
-                </button>
-                <button
-                  onClick={() => handleExport('docx')}
-                  disabled={results.length === 0}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-950 px-4 text-sm font-medium text-white disabled:opacity-40"
-                >
-                  <FileText className="h-4 w-4" /> DOCX
-                </button>
-              </div>
-            </div>
+            ) : null}
           </div>
+        </Card>
+        <p className="px-4 pt-2 text-[13px] text-ios-secondary">เคล็ดลับ: คัดลอกหลายลิงก์ (บรรทัดละ 1 ลิงก์) แล้ววางในช่องแรกได้เลย</p>
 
-          {error ? (
-            <div className="mt-5 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-100">
-              <div className="flex items-center gap-2 font-medium"><AlertCircle className="h-4 w-4" /> {error}</div>
-            </div>
-          ) : null}
-        </section>
+        <button
+          onClick={handleAnalyze}
+          disabled={loading || activeRows.length === 0}
+          className="mt-5 flex h-[52px] w-full items-center justify-center gap-2 rounded-[14px] bg-ios-blue text-[17px] font-semibold text-white transition active:scale-[0.98] active:opacity-80 disabled:bg-ios-blue/40"
+        >
+          {loading ? (
+            <>
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              กำลังเช็ค {progress}/{activeRows.length}
+            </>
+          ) : (
+            <>เช็คเลย{activeRows.length > 1 ? ` (${activeRows.length} ลิงก์)` : ''}</>
+          )}
+        </button>
 
-        {primary ? (
-          <section className="mt-8 grid gap-4 xl:grid-cols-4">
-            <ScoreCard title="Overall score" score={primary.overallScore} subtitle={primary.scoreLabel} />
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-              <div className="text-sm text-slate-400">Yoast score</div>
-              <div className="mt-2 flex items-center gap-3 text-4xl font-semibold text-white">
-                {primary.yoastScore}
-                <YoastLight label={primary.yoastLabel} />
-              </div>
-              <div className="mt-1 text-sm text-slate-500">{primary.yoastLabel}</div>
-              <div className="mt-4"><MetricBar value={primary.yoastScore} /></div>
-            </div>
-            <ScoreCard title="Readability" score={Number(primary.raw.readabilityScore ?? 0)} subtitle="ยิ่งสูงยิ่งอ่านง่าย" />
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
-              <div className="text-sm text-slate-400">Top URL</div>
-              <div className="mt-2 line-clamp-2 text-lg font-semibold text-white">{primary.title}</div>
-              <div className="mt-3 text-sm text-slate-400 break-all">{primary.analyzedUrl}</div>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
-                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1">Keyword: {String(primary.raw.focusKeyword || '-')}</span>
-                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1">Words: {String(primary.raw.wordCount ?? '-')}</span>
-                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1">Title: {String(primary.raw.titleLength ?? '-')}</span>
-              </div>
-            </div>
-          </section>
+        {error ? (
+          <div className="mt-4 flex gap-3 rounded-[14px] bg-ios-red/10 px-4 py-3 text-[15px] text-ios-red">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="break-all">{error}</div>
+          </div>
         ) : null}
 
+        {/* Results list */}
         {results.length > 1 ? (
-          <section className="mt-8 rounded-3xl border border-slate-800 bg-slate-950 p-5">
-            <div className="flex items-center gap-2 text-lg font-semibold text-white"><Table2 className="h-5 w-5 text-cyan-300" /> Compare URLs</div>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-left text-sm text-slate-200">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th className="px-3 py-3">URL</th>
-                    <th className="px-3 py-3">Keyword</th>
-                    <th className="px-3 py-3">Overall</th>
-                    <th className="px-3 py-3">Yoast</th>
-                    <th className="px-3 py-3">Readability</th>
-                    <th className="px-3 py-3">Words</th>
-                    <th className="px-3 py-3">Title</th>
-                    <th className="px-3 py-3 text-right">Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {compareRows.map((row) => (
-                    <tr key={row.url} className={`border-b border-slate-900 align-top transition ${row.isSelected ? 'bg-slate-900/60' : 'hover:bg-slate-900/30'}`}>
-                      <td className="max-w-[320px] px-3 py-4 text-slate-300">{row.url}</td>
-                      <td className="px-3 py-4">{row.keyword || '-'}</td>
-                      <td className="px-3 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-medium ${scoreTone(row.overall).badge}`}>{row.overall}</span></td>
-                      <td className="px-3 py-4"><span className={`rounded-full border px-3 py-1 text-xs font-medium ${scoreTone(row.yoast).badge}`}>{row.yoast}</span></td>
-                      <td className="px-3 py-4">{row.readability}</td>
-                      <td className="px-3 py-4">{row.wordCount}</td>
-                      <td className="px-3 py-4">{row.titleLength}</td>
-                      <td className="px-3 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedUrl(row.url)}
-                          className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition ${row.isSelected ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100' : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'}`}
-                        >
-                          {row.isSelected ? 'กำลังดูอยู่' : 'ดูรายละเอียด'}
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <>
+            <SectionHeader>ผลลัพธ์ · เรียงจากคะแนนสูงสุด</SectionHeader>
+            <Card>
+              <div className="divide-y divide-ios-separator">
+                {results.map((item) => {
+                  const selected = item.analyzedUrl === primary?.analyzedUrl;
+                  const tone = scoreTone(item.overallScore);
+                  return (
+                    <button
+                      key={item.analyzedUrl}
+                      type="button"
+                      onClick={() => {
+                        setSelectedUrl(item.analyzedUrl);
+                        setTab('todo');
+                      }}
+                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition active:bg-ios-bg ${selected ? 'bg-ios-blue/5' : ''}`}
+                    >
+                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold ${tone.soft}`}>
+                        {item.overallScore}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[16px] font-medium">{item.title || item.analyzedUrl}</div>
+                        <div className="truncate text-[13px] text-ios-secondary">{item.analyzedUrl}</div>
+                      </div>
+                      {selected ? <span className="text-[13px] font-medium text-ios-blue">กำลังดู</span> : null}
+                      <ChevronRight className="h-5 w-5 shrink-0 text-ios-tertiary" />
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          </>
         ) : null}
 
+        {/* Selected result */}
         {primary ? (
           <>
-          <section className="mt-8 rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-5">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-sm font-medium uppercase tracking-[0.16em] text-cyan-200">Selected URL details</div>
-                <div className="mt-2 text-base font-semibold text-white break-all">{primary.analyzedUrl}</div>
-                <div className="mt-1 text-sm text-slate-300">Keyword: {String(primary.raw.focusKeyword ?? '-') || '-'}</div>
+            <SectionHeader>ผลการเช็ค</SectionHeader>
+            <Card className="p-5">
+              <div className="flex items-center gap-5">
+                <ScoreRing score={primary.overallScore} />
+                <div className="min-w-0 flex-1">
+                  <div className={`text-[15px] font-semibold ${scoreTone(primary.overallScore).text}`}>{scoreTone(primary.overallScore).label}</div>
+                  <div className="mt-1 line-clamp-2 text-[20px] font-semibold leading-snug">{primary.title}</div>
+                  <a href={primary.analyzedUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[13px] text-ios-blue">
+                    {primary.analyzedUrl}
+                  </a>
+                </div>
               </div>
-              <div className="rounded-full border border-cyan-500/20 bg-slate-950 px-4 py-2 text-sm text-cyan-100">คลิก “ดูรายละเอียด” ในตารางด้านบนเพื่อสลับบทความที่ต้องการดู</div>
-            </div>
-          </section>
-          <div className="mt-8 grid gap-8 xl:grid-cols-[1.05fr,0.95fr]">
-            <div className="space-y-8">
-              <section className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
-                <div className="flex items-center gap-2 text-lg font-semibold text-white"><LayoutList className="h-5 w-5 text-cyan-300" /> Executive summary</div>
-                <div className="mt-2 text-sm leading-6 text-slate-300">{primary.overallZoneSummary}</div>
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  {primary.zones.map((zone) => (
-                    <div key={`${zone.zone}-summary`} className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-white">{zone.title}</div>
-                          <div className="mt-2 text-sm leading-6 text-slate-300">{zone.summary}</div>
-                        </div>
-                        <div className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium ${scoreTone(zone.score).badge}`}>{zone.score}/100</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              <div className="mt-5 flex gap-2">
+                <MiniStat label="Yoast" value={primary.yoastScore} tone={scoreTone(primary.yoastScore).text} />
+                <MiniStat label="อ่านง่าย" value={Number(primary.raw.readabilityScore ?? 0)} tone={scoreTone(Number(primary.raw.readabilityScore ?? 0)).text} />
+                <MiniStat label="จำนวนคำ" value={String(primary.raw.wordCount ?? '-')} />
+              </div>
+              {primary.raw.focusKeyword ? (
+                <div className="mt-3 text-center text-[13px] text-ios-secondary">คีย์เวิร์ด: {String(primary.raw.focusKeyword)}</div>
+              ) : null}
+            </Card>
 
-              <section className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
-                <div className="flex items-center gap-2 text-lg font-semibold text-white"><CheckCircle2 className="h-5 w-5 text-cyan-300" /> Action plan</div>
-                <div className="mt-2 text-sm leading-6 text-slate-400">ดูเฉพาะสิ่งที่บทความยังขาด จุดที่ต้องแก้ และขั้นตอนถัดไป</div>
-                <div className="mt-4 grid gap-4">
-                  {primary.actionPlan.map((item) => (
-                    <ActionPlanCard key={item.id} item={item} />
-                  ))}
-                </div>
-                <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                  <div className="text-sm font-semibold text-white">Quick wins</div>
-                  <div className="mt-3 grid gap-3">
-                    {primary.quickWins.map((win) => (
-                      <div key={win} className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm leading-6 text-cyan-100">{win}</div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-
-              <PriorityChecklist items={primary.yoastItems} />
-            </div>
-
-            <div className="space-y-8">
-              {primary.zones.map((zone) => (
-                <section key={zone.zone} className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-lg font-semibold text-white">{zone.title}</div>
-                      <div className="mt-1 text-sm text-slate-400">คะแนนโซน {zone.score}/100</div>
-                    </div>
-                    <div className={`rounded-full border px-3 py-1 text-xs font-medium ${scoreTone(zone.score).badge}`}>{zone.score}/100</div>
-                  </div>
-                  <div className="mt-3 text-sm leading-6 text-slate-300">{zone.summary}</div>
-                  <div className="mt-4"><MetricBar value={zone.score} /></div>
-                  <div className="mt-5 grid gap-4">
-                    {zone.items.slice(0, 4).map((item) => <ZoneItemCard key={item.id} item={item} />)}
-                  </div>
-                </section>
+            {/* Segmented control */}
+            <div className="mt-6 flex rounded-[10px] bg-ios-fill p-0.5">
+              {([
+                ['todo', 'สิ่งที่ต้องทำ'],
+                ['detail', 'ผลตรวจละเอียด']
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={`h-8 flex-1 rounded-[8px] text-[14px] font-medium transition ${tab === key ? 'bg-white text-ios-label shadow-sm' : 'text-ios-label/70'}`}
+                >
+                  {label}
+                </button>
               ))}
             </div>
-          </div>
+
+            {tab === 'todo' ? (
+              <>
+                {primary.quickWins.length > 0 ? (
+                  <>
+                    <SectionHeader>แก้ง่าย ได้ผลไว</SectionHeader>
+                    <Card>
+                      <Divided>
+                        {primary.quickWins.map((win) => (
+                          <div key={win} className="flex gap-3 px-4 py-3 text-[15px] leading-6">
+                            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-ios-orange" />
+                            <span>{win}</span>
+                          </div>
+                        ))}
+                      </Divided>
+                    </Card>
+                  </>
+                ) : null}
+
+                <SectionHeader>ขั้นตอนแก้ไข</SectionHeader>
+                <Card>
+                  {primary.actionPlan.length > 0 ? (
+                    <Divided>
+                      {primary.actionPlan.map((item, index) => <ActionRow key={item.id} item={item} index={index} />)}
+                    </Divided>
+                  ) : (
+                    <div className="px-4 py-4 text-[15px] text-ios-secondary">ไม่มีอะไรต้องแก้แล้ว 🎉</div>
+                  )}
+                </Card>
+              </>
+            ) : (
+              <>
+                <SectionHeader>สรุปภาพรวม</SectionHeader>
+                <Card className="px-4 py-4 text-[15px] leading-6 text-ios-label">{primary.overallZoneSummary}</Card>
+
+                <SectionHeader>จุดที่ยังไม่ผ่าน ({issues.length})</SectionHeader>
+                <Card>
+                  {issues.length > 0 ? (
+                    <Divided>
+                      {issues.map((item) => (
+                        <CheckRow key={item.id} label={item.label} details={item.details} status={item.status} note={item.suggestion ? `→ ${item.suggestion}` : undefined} />
+                      ))}
+                    </Divided>
+                  ) : (
+                    <div className="px-4 py-4 text-[15px] text-ios-secondary">ทุกจุดสำคัญผ่านเกณฑ์แล้ว</div>
+                  )}
+                </Card>
+
+                {primary.zones.map((zone) => (
+                  <div key={zone.zone}>
+                    <div className="flex items-end justify-between px-4 pb-2 pt-6">
+                      <span className="text-[13px] uppercase tracking-wide text-ios-secondary">{zone.title}</span>
+                      <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${scoreTone(zone.score).soft}`}>{zone.score}</span>
+                    </div>
+                    <Card>
+                      <Divided>
+                        {[
+                          <div key="summary" className="px-4 py-3 text-[14px] leading-6 text-ios-secondary">{zone.summary}</div>,
+                          ...zone.items.map((item: CheckItem) => (
+                            <CheckRow
+                              key={item.id}
+                              label={item.label}
+                              details={item.details}
+                              status={item.status}
+                              right={`${item.score}/${item.maxScore}`}
+                              note={item.status !== 'good' ? `วิธีแก้: ${item.fix}` : undefined}
+                            />
+                          ))
+                        ]}
+                      </Divided>
+                    </Card>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* Export */}
+            <SectionHeader>ดาวน์โหลดรายงาน</SectionHeader>
+            <Card>
+              <Divided>
+                {[
+                  <button key="docx" type="button" onClick={() => handleExport('docx')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[17px] transition active:bg-ios-bg">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-ios-blue text-white"><FileText className="h-4 w-4" /></span>
+                    <span className="flex-1">Word (.docx)</span>
+                    <ChevronRight className="h-5 w-5 text-ios-tertiary" />
+                  </button>,
+                  <button key="csv" type="button" onClick={() => handleExport('csv')} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[17px] transition active:bg-ios-bg">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-ios-green text-white"><Table2 className="h-4 w-4" /></span>
+                    <span className="flex-1">Excel (.csv)</span>
+                    <ChevronRight className="h-5 w-5 text-ios-tertiary" />
+                  </button>
+                ]}
+              </Divided>
+            </Card>
           </>
         ) : null}
       </div>
