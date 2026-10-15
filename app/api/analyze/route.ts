@@ -63,15 +63,10 @@ function normalizeUrl(input: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { url, focusKeyword, html: providedHtml } = await req.json();
+    const { url, focusKeyword } = await req.json();
     const normalizedUrl = normalizeUrl(url);
     const target = new URL(normalizedUrl);
     const keyword = typeof focusKeyword === 'string' ? focusKeyword : '';
-
-    // HTML captured by the user's browser (bookmarklet) — used for sites that block server-side fetches
-    if (typeof providedHtml === 'string' && providedHtml.trim()) {
-      return NextResponse.json(analyzeHtml(providedHtml, target.toString(), keyword));
-    }
 
     const page = await fetchPage(target.toString());
 
@@ -80,7 +75,7 @@ export async function POST(req: NextRequest) {
       const mitigated = page.headers['cf-mitigated'];
       return NextResponse.json(
         {
-          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${page.status}) — เปิดหน้านั้นในเบราว์เซอร์แล้วกด bookmarklet "ส่งไป SEO Audit" แทน`,
+          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${page.status}) — Cloudflare/Firewall ของเว็บนี้บล็อกการเข้าถึงจากเซิร์ฟเวอร์`,
           blockedBy: mitigated ? `Cloudflare (${mitigated})` : page.headers.server || 'unknown',
           cfRay: page.headers['cf-ray'] ?? null,
           pageTitle,

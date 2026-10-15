@@ -1,31 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { IMPORT_STORAGE_KEY, type ImportedPage } from '@/lib/importQueue';
 import type { ActionPlanItem, AnalysisResult, CheckItem, Status, YoastItem } from '@/lib/analyzer';
-import { AlertCircle, Bookmark, CheckCircle2, ChevronRight, FileText, Gauge, LayoutList, Plus, Search, Table2, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronRight, FileText, Gauge, LayoutList, Plus, Search, Table2, Trash2 } from 'lucide-react';
 
 type ExportFormat = 'csv' | 'docx';
-type UrlKeywordRow = { id: number; url: string; keyword: string; html?: string };
+type UrlKeywordRow = { id: number; url: string; keyword: string };
 
 const MAX_ROWS = 12;
-
-// Runs on the target page in the user's browser: strips scripts/styles (keeps JSON-LD schema)
-// and form-POSTs the rendered HTML to /api/import, bypassing bot protection that blocks server fetches.
-function buildBookmarklet(origin: string) {
-  const code = `(()=>{const c=document.documentElement.cloneNode(true);c.querySelectorAll('script:not([type="application/ld+json"]),style').forEach(e=>e.remove());const f=document.createElement('form');f.method='POST';f.action=${JSON.stringify(origin + '/api/import')};f.target='seo-audit';f.acceptCharset='UTF-8';[['url',location.href],['html','<!doctype html>'+c.outerHTML]].forEach(([n,v])=>{const i=document.createElement('textarea');i.name=n;i.value=v;f.appendChild(i)});f.style.display='none';document.body.appendChild(f);f.submit();f.remove()})()`;
-  return `javascript:${encodeURIComponent(code)}`;
-}
-
-function takeImportedPages(): ImportedPage[] {
-  try {
-    const queue = JSON.parse(localStorage.getItem(IMPORT_STORAGE_KEY) || '[]') as ImportedPage[];
-    localStorage.removeItem(IMPORT_STORAGE_KEY);
-    return Array.isArray(queue) ? queue.filter((page) => page?.url && page?.html) : [];
-  } catch {
-    return [];
-  }
-}
 
 function scoreTone(score: number) {
   if (score >= 80) {
@@ -191,34 +173,6 @@ export default function SeoDashboard() {
   const [error, setError] = useState('');
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [selectedUrl, setSelectedUrl] = useState('');
-  const [bookmarklet, setBookmarklet] = useState('');
-
-  useEffect(() => {
-    setBookmarklet(buildBookmarklet(window.location.origin));
-
-    function importPages() {
-      const pages = takeImportedPages();
-      if (pages.length === 0) return;
-      setRows((current) => {
-        const next = current.filter((row) => row.url.trim()).map((row) => ({ ...row }));
-        let nextId = current.length ? Math.max(...current.map((row) => row.id)) + 1 : 1;
-        for (const page of pages) {
-          const existing = next.find((row) => row.url.trim() === page.url);
-          if (existing) existing.html = page.html;
-          else if (next.length < MAX_ROWS) next.push({ id: nextId++, url: page.url, keyword: '', html: page.html });
-        }
-        return next.length ? next : [{ id: 1, url: '', keyword: '' }];
-      });
-    }
-
-    importPages();
-    window.addEventListener('storage', importPages);
-    window.addEventListener('focus', importPages);
-    return () => {
-      window.removeEventListener('storage', importPages);
-      window.removeEventListener('focus', importPages);
-    };
-  }, []);
 
   useEffect(() => {
     if (results.length === 0) {
@@ -253,11 +207,7 @@ export default function SeoDashboard() {
   }, [results, selectedUrl]);
 
   function updateRow(id: number, field: 'url' | 'keyword', value: string) {
-    setRows((current) =>
-      current.map((row) =>
-        row.id === id ? { ...row, [field]: value, ...(field === 'url' ? { html: undefined } : {}) } : row
-      )
-    );
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
   }
 
   function addRow() {
@@ -275,11 +225,11 @@ export default function SeoDashboard() {
     });
   }
 
-  async function analyzeOne(targetUrl: string, keyword: string, html?: string) {
+  async function analyzeOne(targetUrl: string, keyword: string) {
     const response = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: targetUrl, focusKeyword: keyword, html })
+      body: JSON.stringify({ url: targetUrl, focusKeyword: keyword })
     });
 
     const data = await response.json();
@@ -300,7 +250,7 @@ export default function SeoDashboard() {
       setError('');
       const analyzed: AnalysisResult[] = [];
       for (const row of activeRows) {
-        const data = await analyzeOne(row.url, row.keyword, row.html);
+        const data = await analyzeOne(row.url, row.keyword);
         analyzed.push(data);
       }
       analyzed.sort((a, b) => b.overallScore - a.overallScore);
@@ -381,14 +331,7 @@ export default function SeoDashboard() {
               {rows.map((row, index) => (
                 <div key={row.id} className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 lg:grid-cols-[1fr_260px_56px]">
                   <div>
-                    <label className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-slate-500">
-                      URL {index + 1}
-                      {row.html ? (
-                        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 normal-case tracking-normal text-cyan-200">
-                          HTML จากเบราว์เซอร์
-                        </span>
-                      ) : null}
-                    </label>
+                    <label className="text-xs uppercase tracking-[0.16em] text-slate-500">URL {index + 1}</label>
                     <input
                       value={row.url}
                       onChange={(e) => updateRow(row.id, 'url', e.target.value)}
@@ -446,24 +389,6 @@ export default function SeoDashboard() {
                 </button>
               </div>
             </div>
-          </div>
-
-          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="font-medium text-slate-200">เว็บที่ขึ้น 403 / Cloudflare บล็อก</div>
-              <div className="mt-1">
-                ลากปุ่มนี้ไปไว้ที่แถบ Bookmarks → เปิดหน้าเว็บที่ต้องการ → กด bookmark นี้ หน้าเว็บจะถูกส่งมาที่แถวด้านบน แล้วกด Analyze
-              </div>
-            </div>
-            {bookmarklet ? (
-              <a
-                href={bookmarklet}
-                onClick={(e) => e.preventDefault()}
-                className="inline-flex h-11 shrink-0 cursor-grab items-center justify-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 font-medium text-cyan-100"
-              >
-                <Bookmark className="h-4 w-4" /> ส่งไป SEO Audit
-              </a>
-            ) : null}
           </div>
 
           {error ? (
