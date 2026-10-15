@@ -1,18 +1,58 @@
+import http from 'node:http';
+import https from 'node:https';
+import zlib from 'node:zlib';
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeHtml } from '@/lib/analyzer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BROWSER_HEADERS = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Cache-Control': 'no-cache',
-  Pragma: 'no-cache',
-  'Upgrade-Insecure-Requests': '1'
+const REQUEST_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; AI-SEO-Assistant/2.0; +https://vercel.com)',
+  Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+  'Accept-Encoding': 'gzip, deflate, br'
 };
+const MAX_REDIRECTS = 5;
+const TIMEOUT_MS = 20000;
+
+type FetchedPage = { status: number; url: string; headers: http.IncomingHttpHeaders; body: string };
+
+function decode(res: http.IncomingMessage) {
+  switch (res.headers['content-encoding']) {
+    case 'gzip':
+      return res.pipe(zlib.createGunzip());
+    case 'deflate':
+      return res.pipe(zlib.createInflate());
+    case 'br':
+      return res.pipe(zlib.createBrotliDecompress());
+    default:
+      return res;
+  }
+}
+
+// Uses node:https instead of global fetch (undici): on Node 22+ Cloudflare challenges
+// undici requests to some sites (e.g. sonext.asia) that it lets through from node:https.
+function fetchPage(url: string, redirectsLeft = MAX_REDIRECTS): Promise<FetchedPage> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('http://') ? http : https;
+    const req = client.get(url, { headers: REQUEST_HEADERS, timeout: TIMEOUT_MS }, (res) => {
+      const status = res.statusCode ?? 0;
+      const location = res.headers.location;
+      if (status >= 300 && status < 400 && location) {
+        res.resume();
+        if (redirectsLeft === 0) return reject(new Error('Redirect มากเกินไป'));
+        return resolve(fetchPage(new URL(location, url).toString(), redirectsLeft - 1));
+      }
+      const chunks: Buffer[] = [];
+      decode(res)
+        .on('data', (chunk: Buffer) => chunks.push(chunk))
+        .on('end', () => resolve({ status, url, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }))
+        .on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('หมดเวลาในการดึงหน้าเว็บ')));
+    req.on('error', reject);
+  });
+}
 
 function normalizeUrl(input: string) {
   const trimmed = input.trim();
@@ -33,41 +73,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(analyzeHtml(providedHtml, target.toString(), keyword));
     }
 
-    const response = await fetch(target.toString(), {
-      headers: BROWSER_HEADERS,
-      redirect: 'follow',
-      cache: 'no-store'
-    });
+    const page = await fetchPage(target.toString());
 
-    if (response.status === 403 || response.status === 429) {
-      const body = await response.text().catch(() => '');
-      const pageTitle = body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? '';
-      const blockedBy = response.headers.get('cf-mitigated')
-        ? `Cloudflare (${response.headers.get('cf-mitigated')})`
-        : response.headers.get('server') || 'unknown';
+    if (page.status === 403 || page.status === 429) {
+      const pageTitle = page.body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ?? '';
+      const mitigated = page.headers['cf-mitigated'];
       return NextResponse.json(
         {
-          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — เปิดหน้านั้นในเบราว์เซอร์แล้วกด bookmarklet "ส่งไป SEO Audit" แทน`,
-          blockedBy,
-          cfRay: response.headers.get('cf-ray'),
+          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${page.status}) — เปิดหน้านั้นในเบราว์เซอร์แล้วกด bookmarklet "ส่งไป SEO Audit" แทน`,
+          blockedBy: mitigated ? `Cloudflare (${mitigated})` : page.headers.server || 'unknown',
+          cfRay: page.headers['cf-ray'] ?? null,
           pageTitle,
-          bodySnippet: body.replace(/\s+/g, ' ').slice(0, 300)
+          bodySnippet: page.body.replace(/\s+/g, ' ').slice(0, 300)
         },
         { status: 400 }
       );
     }
 
-    if (!response.ok) {
-      return NextResponse.json({ error: `ไม่สามารถดึงหน้าเว็บได้ (${response.status})` }, { status: 400 });
+    if (page.status < 200 || page.status >= 300) {
+      return NextResponse.json({ error: `ไม่สามารถดึงหน้าเว็บได้ (${page.status})` }, { status: 400 });
     }
 
-    const contentType = response.headers.get('content-type') || '';
+    const contentType = page.headers['content-type'] || '';
     if (!contentType.includes('text/html')) {
       return NextResponse.json({ error: 'URL นี้ไม่ได้ส่งกลับเป็นหน้า HTML ที่วิเคราะห์ได้' }, { status: 400 });
     }
 
-    const html = await response.text();
-    const result = analyzeHtml(html, response.url || target.toString(), keyword);
+    const result = analyzeHtml(page.body, page.url, keyword);
 
     return NextResponse.json(result);
   } catch (error) {
