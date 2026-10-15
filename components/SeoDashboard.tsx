@@ -11,6 +11,7 @@ type DetailTab = 'todo' | 'detail';
 
 const MAX_ROWS = 12;
 
+
 function scoreTone(score: number) {
   if (score >= 80) return { color: '#34C759', text: 'text-ios-green', soft: 'bg-ios-green/10 text-ios-green', label: 'ดีมาก' };
   if (score >= 55) return { color: '#FF9500', text: 'text-ios-orange', soft: 'bg-ios-orange/10 text-ios-orange', label: 'พอใช้' };

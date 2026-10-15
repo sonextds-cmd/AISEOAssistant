@@ -13,7 +13,7 @@ export default function LoginPage() {
   const handleAzureLogin = async () => {
     setLoading(true);
     setError("");
-    await signIn("azure-ad", { redirect: true, callbackUrl: "/" });
+    await signIn("microsoft-entra-id", { redirect: true, callbackUrl: "/" });
   };
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
