@@ -23,9 +23,15 @@ function normalizeUrl(input: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { url, focusKeyword } = await req.json();
+    const { url, focusKeyword, html: providedHtml } = await req.json();
     const normalizedUrl = normalizeUrl(url);
     const target = new URL(normalizedUrl);
+    const keyword = typeof focusKeyword === 'string' ? focusKeyword : '';
+
+    // HTML captured by the user's browser (bookmarklet) — used for sites that block server-side fetches
+    if (typeof providedHtml === 'string' && providedHtml.trim()) {
+      return NextResponse.json(analyzeHtml(providedHtml, target.toString(), keyword));
+    }
 
     const response = await fetch(target.toString(), {
       headers: BROWSER_HEADERS,
@@ -41,7 +47,7 @@ export async function POST(req: NextRequest) {
         : response.headers.get('server') || 'unknown';
       return NextResponse.json(
         {
-          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — ตรวจสอบว่า Cloudflare/Firewall หรือปลั๊กอินความปลอดภัยไม่ได้บล็อก bot หรือ IP ของ Vercel`,
+          error: `เว็บไซต์ปลายทางบล็อกการดึงข้อมูลอัตโนมัติ (${response.status}) — เปิดหน้านั้นในเบราว์เซอร์แล้วกด bookmarklet "ส่งไป SEO Audit" แทน`,
           blockedBy,
           cfRay: response.headers.get('cf-ray'),
           pageTitle,
@@ -61,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     const html = await response.text();
-    const result = analyzeHtml(html, response.url || target.toString(), typeof focusKeyword === 'string' ? focusKeyword : '');
+    const result = analyzeHtml(html, response.url || target.toString(), keyword);
 
     return NextResponse.json(result);
   } catch (error) {
